@@ -5,8 +5,8 @@ from os import path
 from ffmpeg.asyncio import FFmpeg
 
 
-TEST_FILE = path.join('static', 'knicks_bar.mov')
-OUT_FILE = path.join('test', 'knicks_bar.mpd')
+TEST_FILE = path.join('test', 'lilo_and_stich.mp4')
+OUT_FILE = path.join('test', 'lilo_and_stich', 'lilo_and_stich.mpd')
 
 
 async def main():

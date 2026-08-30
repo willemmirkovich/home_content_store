@@ -45,6 +45,8 @@ Project to serve content (video, games, ...) via home DB for access via player o
 
 ## Planned Scope
 
+- Have listener that picks up work and creates jobs on the fly
+- Keep original copy of content for bookeeping purposes
 - Add authentication for web app
 - Add content store for video game files
 
