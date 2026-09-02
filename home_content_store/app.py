@@ -7,9 +7,10 @@ from fastapi import FastAPI, Request
 from os import makedirs, path, remove
 from concurrent.futures import Future, ProcessPoolExecutor
 from multiprocessing import Manager, Queue
+from shutil import rmtree
 
 from home_content_store.models import UploadResponse
-from home_content_store.workers import download_file, compress, process_video, mock_process_video
+from home_content_store.workers import download_file, compress, create_streamable_artifact, mock_process_video
 
 
 logger = logging.getLogger('uvicorn.error')
@@ -49,16 +50,19 @@ app = FastAPI(lifespan=lifespan)
 # NOTE: max_tasks_per_child to setup lifetime for process
 
 DIR = path.abspath(path.join(__file__, "..", "..", "test"))
+STREAM_DIR = path.abspath(path.join(__file__, "..", "..", "test", "streams"))
 
 
 
-async def cleanup_when_done(futures: list[Future], file_path: str):
+async def cleanup_when_done(futures: list[Future], staging_dir_path: str):
     asyncio_futures = [asyncio.wrap_future(f) for f in futures]
+    # actually, can have do db updates here based on futures and tasks
     results = await asyncio.gather(*(asyncio_futures), return_exceptions=True)
     exceptions = list(filter(lambda el: isinstance(el, Exception), results))
     for e in exceptions:
         logger.error(e)
-    remove(file_path)
+    rmtree(staging_dir_path)
+    logger.info(f'{staging_dir_path} removed')
 
 
 @app.post("/upload")
@@ -71,17 +75,21 @@ async def upload(request: Request, name: str, format: str) -> UploadResponse:
 
 
     dir_path = path.join(DIR, 'files', name)
+    stream_path = path.join(STREAM_DIR, name)
     file_path = path.join(dir_path, f'{name}.{format}')
     makedirs(dir_path)
 
     total_bytes = await download_file(request, file_path)
 
+    # TODO: create taskids here
     # TODO: handle file types
     futures = [
-        request.app.state.executor.submit(mock_process_video, file_path,
+        request.app.state.executor.submit(create_streamable_artifact, 
+                                          file_path,
+                                          stream_path,
                                           request.app.state.progress_queue)
     ]
-    asyncio.create_task(cleanup_when_done(futures, file_path))
+    asyncio.create_task(cleanup_when_done(futures, dir_path))
 
     return UploadResponse(
         id='test',
