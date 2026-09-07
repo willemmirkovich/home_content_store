@@ -1,4 +1,5 @@
 **/.DS_STORE
 static/**
 test/**
+data/**
 **/__pycache__/**

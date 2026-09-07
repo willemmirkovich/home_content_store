@@ -7,12 +7,11 @@ from typing import Iterator, Optional
 from sqlmodel import SQLModel, Field, Session, create_engine
 
 from home_content_store.models import FileFormat, TaskType, TaskStatus
+from home_content_store.env import DATA_DIR
 
 
 # `data/` sits next to the package so the db file (and any other file-based
 # stores) can be moved to a new machine by copying one directory.
-DATA_DIR = Path(__file__).resolve().parent.parent / "db"
-DATA_DIR.mkdir(exist_ok=True)
 DB_PATH = DATA_DIR / "content_store.db"
 
 engine = create_engine(
@@ -75,6 +74,10 @@ class Task(SQLModel, table=True):
     status: str
 
     progress: float
+
+    start_time: datetime = Field(default_factory=datetime.now)
+
+    end_time: datetime | None = Field(default=None)
 
     error: str | None = Field(default=None)
 
@@ -140,6 +143,7 @@ def update_task(
     status: Optional[TaskStatus] = None,
     progress: Optional[float] = None,
     error: Optional[str] = None,
+    end_time: Optional[datetime] = None,
 ) -> None:
     with get_session() as session:
         task = session.get(Task, task_id)
@@ -151,6 +155,8 @@ def update_task(
             task.progress = progress
         if error is not None:
             task.error = error
+        if end_time is not None:
+            task.end_time = end_time
         session.add(task)
         session.flush()
         session.refresh(task)

@@ -25,6 +25,7 @@ from shutil import rmtree
 from home_content_store.db import Task, create_content, init_db, mark_processed, update_task, create_task, init_db
 from home_content_store.models import FILE_FORMAT_TO_EXT, FileFormat, TaskStatus, TaskType, UploadResponse
 from home_content_store.workers import download_file, create_streamable_artifact, probe_video_info
+from home_content_store.env import DATA_DIR
 
 
 logger = logging.getLogger('uvicorn.error')
@@ -36,6 +37,9 @@ PROCESS_WORKERS = 2
 init_db()
 
 
+# TODO: staging area dir, data dir for all stream/db/... files
+
+
 async def _progress_listener(queue: Queue) -> None:
     """Single listener draining every task's progress updates and logging them."""
     loop = asyncio.get_running_loop()
@@ -44,7 +48,6 @@ async def _progress_listener(queue: Queue) -> None:
             task_id, progress = await loop.run_in_executor(None, queue.get, True, 0.5)
         except Empty:
             continue
-        logger.info(f'task {task_id} progress: {progress}')
         update_task(task_id, progress=progress)
 
 
@@ -67,9 +70,7 @@ app = FastAPI(lifespan=lifespan)
 # TODO: setup lifespan with process pool
 # NOTE: max_tasks_per_child to setup lifetime for process
 
-DIR = path.abspath(path.join(__file__, "..", "..", "test"))
-STREAM_DIR = path.abspath(path.join(__file__, "..", "..", "test", "streams"))
-
+STREAM_DIR = DATA_DIR / "streams"
 
 
 async def cleanup_when_done(tasks: list[Task], futures: list[Future], staging_dir_path: str):
@@ -108,9 +109,11 @@ async def upload(request: Request,
                  format: FileFormat,
                  description: str) -> UploadResponse:
     name_snake_case = name.lower().replace(" ", "_").strip()
-    dir_path = path.join(DIR, 'files', name_snake_case)
+    dir_path = DATA_DIR / "files" / name_snake_case
+    # dir_path = path.join(DIR, 'files', name_snake_case)
     file_ext = FILE_FORMAT_TO_EXT[format]
-    file_path = path.join(dir_path, f'{name_snake_case}.{file_ext}')
+    # file_path = path.join(dir_path, f'{name_snake_case}.{file_ext}')
+    file_path = str(dir_path / f'{name_snake_case}.{file_ext}')
     makedirs(dir_path)
 
     total_bytes = await download_file(request, file_path)
@@ -121,7 +124,10 @@ async def upload(request: Request,
     # TODO: async?
     content = create_content(name, format, description, int(duration_s))
 
-    stream_path = path.join(STREAM_DIR, str(content.id))
+    stream_path = str(STREAM_DIR / str(content.id))
+    # NOTE: should not happen in production setting with db managing ids
+    if path.exists(stream_path):
+        raise RuntimeError(f'{stream_path} path already exists')
 
     # TODO: create taskids here
     # TODO: handle file types
@@ -138,7 +144,7 @@ async def upload(request: Request,
                                           total_frames,
                                           request.app.state.progress_queue)
     ]
-    asyncio.create_task(cleanup_when_done(tasks, futures, dir_path))
+    asyncio.create_task(cleanup_when_done(tasks, futures, str(dir_path)))
 
     return UploadResponse(
         id=content.id,

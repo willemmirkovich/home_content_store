@@ -4,8 +4,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@db:5432/home_content_store
+      DATA_DIR: '/app/data'
     volumes:
       - ./home_content_store:/app/home_content_store
-      - ./test:/app/test
-      - ./db:/app/db
+      - ./data:/app/data
