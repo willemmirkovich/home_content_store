@@ -23,8 +23,13 @@ FILE_FORMAT_TO_EXT: dict[FileFormat, str] = {
 
 
 class UploadResponse(BaseModel):
-    id: int 
+    id: int
     size_mb: float
+
+
+class BrowseResponse(BaseModel):
+    content_id: int
+    name: str
 
 
 class TaskType(StrEnum):

@@ -101,8 +101,7 @@ def create_streamable_artifact(task_id: UUID,
     progress_queue: queue to publish `(video_file, progress_fraction)` updates to
     """
     makedirs(stream_dir, exist_ok=True)
-    name = path.splitext(path.basename(video_file))[0]
-    manifest_path = path.join(stream_dir, f'{name}.mpd')
+    manifest_path = path.join(stream_dir, 'manifest.mpd')
 
     ffmpeg = (
         FFmpeg()

@@ -16,14 +16,16 @@ import logging
 
 from contextlib import asynccontextmanager
 from queue import Empty
-from fastapi import FastAPI, Request
+import re
+
+from fastapi import FastAPI, HTTPException, Request
 from os import makedirs, path
 from concurrent.futures import Future, ProcessPoolExecutor
 from multiprocessing import Manager, Queue
 from shutil import rmtree
 
-from home_content_store.db import Task, create_content, init_db, mark_processed, update_task, create_task, init_db
-from home_content_store.models import FILE_FORMAT_TO_EXT, FileFormat, TaskStatus, TaskType, UploadResponse
+from home_content_store.db import Task, browse_content, create_content, init_db, mark_processed, update_task, create_task, init_db
+from home_content_store.models import FILE_FORMAT_TO_EXT, BrowseResponse, FileFormat, TaskStatus, TaskType, UploadResponse
 from home_content_store.workers import download_file, create_streamable_artifact, probe_video_info
 from home_content_store.env import DATA_DIR
 
@@ -98,13 +100,8 @@ async def cleanup_when_done(tasks: list[Task], futures: list[Future], staging_di
     logger.info(f'{staging_dir_path} removed')
 
 
-@app.get("/download/{id}")
-async def download(id: int):
-    pass
-
-
 @app.post("/upload")
-async def upload(request: Request,
+async def post_upload(request: Request,
                  name: str,
                  format: FileFormat,
                  description: str) -> UploadResponse:
@@ -150,3 +147,18 @@ async def upload(request: Request,
         id=content.id,
         size_mb=total_bytes
     )
+
+@app.get('/browse')
+async def get_browse(name: str | None = None, type: str | None = None) -> list[BrowseResponse]:
+    try:
+        contents = browse_content(name=name, type=type)
+    except re.error as e:
+        raise HTTPException(status_code=400, detail=f'invalid regex: {e}')
+    return [BrowseResponse(content_id=content.id, name=content.name) for content in contents]
+
+@app.get('/content/{content_id}')
+async def get_content():
+    """
+    Get content information, and if streamable, get streaming locatoin
+    """
+    pass

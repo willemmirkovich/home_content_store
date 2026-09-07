@@ -1,10 +1,13 @@
+import re
 from uuid import UUID, uuid4
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Iterator, Optional
 
-from sqlmodel import SQLModel, Field, Session, create_engine
+from sqlalchemy import event
+from sqlalchemy import event
+from sqlmodel import SQLModel, Field, Session, create_engine, select
 
 from home_content_store.models import FileFormat, TaskType, TaskStatus
 from home_content_store.env import DATA_DIR
@@ -20,6 +23,16 @@ engine = create_engine(
     # against the same file without sqlite complaining.
     connect_args={"check_same_thread": False},
 )
+
+
+@event.listens_for(engine, "connect")
+def _register_regexp(dbapi_connection, connection_record) -> None:
+    # sqlite has no native regex support; `Column.regexp_match()` compiles
+    # to the REGEXP operator, which sqlite dispatches to a user-defined
+    # function that must be registered per-connection.
+    dbapi_connection.create_function(
+        "REGEXP", 2, lambda pattern, value: re.search(pattern, value) is not None
+    )
 
 
 class Content(SQLModel, table=True):
@@ -160,6 +173,22 @@ def update_task(
         session.add(task)
         session.flush()
         session.refresh(task)
+
+
+def browse_content(
+    name: Optional[str] = None,
+    type: Optional[str] = None,
+) -> list[Content]:
+    """
+    Filter content by name and/or type (media format), both matched as regexes.
+    """
+    query = select(Content)
+    if name is not None:
+        query = query.where(Content.name.regexp_match(name))
+    if type is not None:
+        query = query.where(Content.format.regexp_match(type))
+    with get_session() as session:
+        return list(session.exec(query).all())
 
 
 def mark_processed(content_id: int, processed_time: Optional[datetime] = None) -> None:
