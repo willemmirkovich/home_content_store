@@ -1,2 +1,4 @@
 python-ffmpeg
 fastapi[standard]
+alembic
+sqlmodel

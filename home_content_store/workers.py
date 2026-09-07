@@ -2,6 +2,7 @@ import json
 import subprocess
 import time
 
+from uuid import UUID
 from fastapi import Request
 from os import makedirs, path
 from typing import Callable
@@ -52,7 +53,7 @@ def mock_process_video(video_file: str,
     return
 
 
-def _probe_total_frames(video_file: str) -> int:
+def probe_video_info(video_file: str) -> tuple[float, int]:
     """
     total frame count of `video_file`'s first video stream, via `ffprobe`.
 
@@ -76,15 +77,18 @@ def _probe_total_frames(video_file: str) -> int:
     data = json.loads(result.stdout)
     stream = data["streams"][0]
 
-    duration = float(data["format"]["duration"])
+    duration_s = float(data["format"]["duration"])
     num, den = stream["r_frame_rate"].split("/")
     fps = float(num) / float(den)
-    return round(duration * fps)
+    total_frames = round(duration_s * fps)
+    return duration_s, total_frames
 
 
 # TODO: name here
-def create_streamable_artifact(video_file: str,
+def create_streamable_artifact(task_id: UUID,
+                               video_file: str,
                                stream_dir: str,
+                               total_frames: int,
                                progress_queue: Queue):
     """
     process video file to `mpeg-dash` format for streaming
@@ -97,13 +101,12 @@ def create_streamable_artifact(video_file: str,
     name = path.splitext(path.basename(video_file))[0]
     manifest_path = path.join(stream_dir, f'{name}.mpd')
 
-    total_frames = _probe_total_frames(video_file)
-
     ffmpeg = (
         FFmpeg()
         .input(video_file)
         .output(
             manifest_path,
+            # NOTE: this only stores one format, need to potentially save many for 4k, 1080p, 720p, ...
             {"codec:v": "libx264", "codec:a": "aac", "profile:v": "high"},
             f="dash",
             seg_duration=3,
@@ -113,6 +116,9 @@ def create_streamable_artifact(video_file: str,
 
     @ffmpeg.on("progress")
     def on_progress(progress: Progress):
-        progress_queue.put((video_file, min(progress.frame / total_frames, 1.0)))
+        rounded_progress = round(min(progress.frame / total_frames, 1.0), 2)
+        progress_queue.put((task_id, rounded_progress))
 
     ffmpeg.execute()
+
+    return task_id
