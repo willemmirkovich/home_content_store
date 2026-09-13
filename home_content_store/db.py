@@ -2,14 +2,13 @@ import re
 from uuid import UUID, uuid4
 from contextlib import contextmanager
 from datetime import datetime
-from pathlib import Path
 from typing import Iterator, Optional
 
 from sqlalchemy import event
 from sqlalchemy import event
 from sqlmodel import SQLModel, Field, Session, create_engine, select
 
-from home_content_store.models import FileFormat, TaskType, TaskStatus
+from home_content_store.models import ContentType, FileFormat, TaskType, TaskStatus
 from home_content_store.env import DATA_DIR
 
 
@@ -39,12 +38,18 @@ class Content(SQLModel, table=True):
 
     id: int = Field(default=None, primary_key=True)
 
-    name: str
+    name: str = Field(unique=True)
     """
-    Name of the content
+    Name of the content. Must be unique
     """
 
-    format: str
+    title: str
+    """
+    Tiltle of content, can be duplicated. For instance, Season 1
+    of tv show
+    """
+
+    format: FileFormat
     """
     Media type of the content
     """
@@ -55,6 +60,13 @@ class Content(SQLModel, table=True):
 
     Examples: Movie description, video game synopsis, ...
     """
+
+    content_type: ContentType
+    """
+    Type of content
+    """
+
+    parent_id: int | None = Field(default=None)
 
     # TODO: add metadata support
 
@@ -117,14 +129,21 @@ def get_session() -> Iterator[Session]:
 
 def create_content(
     name: str,
+    title: str,
     format: FileFormat,
+    content_type: ContentType,
     description: str,
-    duration_s: Optional[int] = None,
+    duration_s: int | None = None,
+    parent_id: int | None = None,
 ) -> Content:
+    # TODO: try/catch sqlalchemy exceptions
+    # TODO: handle parent_id
     with get_session() as session:
         content = Content(
             name=name,
-            format=format.value,
+            title=title,
+            content_type=content_type,
+            format=format,
             description=description,
             duration_s=duration_s,
         )
@@ -175,9 +194,14 @@ def update_task(
         session.refresh(task)
 
 
+def get_content_by_id(content_id: int) -> Optional[Content]:
+    with get_session() as session:
+        return session.get(Content, content_id)
+
+
 def browse_content(
     name: Optional[str] = None,
-    type: Optional[str] = None,
+    content_type: Optional[ContentType] = None,
 ) -> list[Content]:
     """
     Filter content by name and/or type (media format), both matched as regexes.
@@ -185,8 +209,8 @@ def browse_content(
     query = select(Content)
     if name is not None:
         query = query.where(Content.name.regexp_match(name))
-    if type is not None:
-        query = query.where(Content.format.regexp_match(type))
+    if content_type is not None:
+        query = query.where(Content.content_type == content_type)
     with get_session() as session:
         return list(session.exec(query).all())
 

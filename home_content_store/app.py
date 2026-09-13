@@ -11,7 +11,6 @@ stream -> get location of mpd file to stream movie/music
 
 
 import asyncio
-from asyncio.tasks import create_task
 import logging
 
 from contextlib import asynccontextmanager
@@ -19,15 +18,17 @@ from queue import Empty
 import re
 
 from fastapi import FastAPI, HTTPException, Request
-from os import makedirs, path
+from fastapi.staticfiles import StaticFiles
+from os import makedirs
 from concurrent.futures import Future, ProcessPoolExecutor
 from multiprocessing import Manager, Queue
 from shutil import rmtree
 
-from home_content_store.db import Task, browse_content, create_content, init_db, mark_processed, update_task, create_task, init_db
-from home_content_store.models import FILE_FORMAT_TO_EXT, BrowseResponse, FileFormat, TaskStatus, TaskType, UploadResponse
-from home_content_store.workers import download_file, create_streamable_artifact, probe_video_info
-from home_content_store.env import DATA_DIR
+from home_content_store.env import DATA_DIR, STREAM_DIR
+from home_content_store.db import Task, browse_content, get_content_by_id, init_db, mark_processed, update_task, init_db
+from home_content_store.models import FILE_FORMAT_TO_EXT, BrowseResponse, ContentModel, ContentResponse, ContentType, FileFormat, TaskStatus, UploadResponse
+from home_content_store.workers import download_file
+from home_content_store.handlers import HANDLERS
 
 
 logger = logging.getLogger('uvicorn.error')
@@ -72,7 +73,7 @@ app = FastAPI(lifespan=lifespan)
 # TODO: setup lifespan with process pool
 # NOTE: max_tasks_per_child to setup lifetime for process
 
-STREAM_DIR = DATA_DIR / "streams"
+app.mount("/streams", StaticFiles(directory=STREAM_DIR), name="streams")
 
 
 async def cleanup_when_done(tasks: list[Task], futures: list[Future], staging_dir_path: str):
@@ -101,11 +102,18 @@ async def cleanup_when_done(tasks: list[Task], futures: list[Future], staging_di
 
 
 @app.post("/upload")
-async def post_upload(request: Request,
-                 name: str,
-                 format: FileFormat,
-                 description: str) -> UploadResponse:
+async def post_upload(
+    request: Request,
+    # TODO: modify in place arg?
+    name: str,
+    title: str,
+    format: FileFormat,
+    description: str,
+    content_type: ContentType,
+    parent_id: int | None = None
+) -> UploadResponse:
     name_snake_case = name.lower().replace(" ", "_").strip()
+
     dir_path = DATA_DIR / "files" / name_snake_case
     # dir_path = path.join(DIR, 'files', name_snake_case)
     file_ext = FILE_FORMAT_TO_EXT[format]
@@ -115,32 +123,24 @@ async def post_upload(request: Request,
 
     total_bytes = await download_file(request, file_path)
 
-    # conditional here
-    duration_s, total_frames = probe_video_info(file_path)
+    content_model = ContentModel(
+        name=name_snake_case,
+        title=title,
+        format=format,
+        description=description,
+        content_type=content_type,
+        parent_id=parent_id
+    )
 
-    # TODO: async?
-    content = create_content(name, format, description, int(duration_s))
 
-    stream_path = str(STREAM_DIR / str(content.id))
-    # NOTE: should not happen in production setting with db managing ids
-    if path.exists(stream_path):
-        raise RuntimeError(f'{stream_path} path already exists')
+    try:
+        handler = HANDLERS[content_type]
+    except KeyError:
+        raise HTTPException(status_code=500, detail=f'{content_type} is not handled yet')
+    content, tasks, futures = handler(
+        request, content_model, file_path
+    )
 
-    # TODO: create taskids here
-    # TODO: handle file types
-
-    task = create_task(content.id, TaskType.MPEG_DASH)
-
-    tasks = [task]
-
-    futures = [
-        request.app.state.executor.submit(create_streamable_artifact, 
-                                          task.id,
-                                          file_path,
-                                          stream_path,
-                                          total_frames,
-                                          request.app.state.progress_queue)
-    ]
     asyncio.create_task(cleanup_when_done(tasks, futures, str(dir_path)))
 
     return UploadResponse(
@@ -148,17 +148,36 @@ async def post_upload(request: Request,
         size_mb=total_bytes
     )
 
+
 @app.get('/browse')
-async def get_browse(name: str | None = None, type: str | None = None) -> list[BrowseResponse]:
+async def get_browse(name: str | None = None, content_type: ContentType | None = None) -> list[BrowseResponse]:
     try:
-        contents = browse_content(name=name, type=type)
+        contents = browse_content(name=name, content_type=content_type)
     except re.error as e:
         raise HTTPException(status_code=400, detail=f'invalid regex: {e}')
     return [BrowseResponse(content_id=content.id, name=content.name) for content in contents]
 
+
 @app.get('/content/{content_id}')
-async def get_content():
+async def get_content(content_id: int) -> ContentResponse:
     """
-    Get content information, and if streamable, get streaming locatoin
+    Get content information, and if streamable, get streaming location
     """
-    pass
+    content = get_content_by_id(content_id)
+    if content is None:
+        raise HTTPException(status_code=404, detail=f'no content with id {content_id}')
+
+    manifest_url = None
+    if content.processed_time is not None:
+        manifest_url = f'/streams/{content.id}/manifest.mpd'
+
+    return ContentResponse(
+        id=content.id,
+        name=content.name,
+        format=content.format,
+        description=content.description,
+        duration_s=content.duration_s,
+        upload_time=content.uploade_time,
+        processed_time=content.processed_time,
+        manifest_url=manifest_url,
+    )

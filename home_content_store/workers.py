@@ -1,6 +1,5 @@
 import json
 import subprocess
-import time
 
 from uuid import UUID
 from datetime import datetime
@@ -56,6 +55,7 @@ def mock_process_video(video_file: str,
     return
 
 
+# TODO: probe HxW px
 def probe_video_info(video_file: str) -> tuple[float, int]:
     """
     total frame count of `video_file`'s first video stream, via `ffprobe`.
