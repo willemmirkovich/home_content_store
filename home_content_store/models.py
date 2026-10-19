@@ -1,7 +1,7 @@
 from datetime import datetime
 from enum import StrEnum
-from typing import Any
 from pydantic import BaseModel, Field
+from datetime import date
 
 
 class FileFormat(StrEnum):
@@ -11,22 +11,14 @@ class FileFormat(StrEnum):
     MOV = "video/quicktime"
     MP4 = "video/mp4"
 
-    # game
     # FUTURE: add game format
 
     # FUTURE: music streaming???
 
 class ContentType(StrEnum):
+    """Content types to store"""
 
     MOVIE = 'movie'
-
-    TV_SHOW = 'tv_show'
-
-    TV_SEASON = 'tv_season'
-
-    TV_EPISODE = 'tv_episode'
-
-    RECORDING = 'recording'
 
 
 class ContentModel(BaseModel):
@@ -39,9 +31,13 @@ class ContentModel(BaseModel):
 
     description: str
 
+    release_date: date
+
     content_type: ContentType
 
-    parent_id: int | None = Field(default=None)
+    genres: list[str] | None = Field(default=[])
+
+    content_metadata: dict | None = Field(default={})
 
 
 FILE_FORMAT_TO_EXT: dict[FileFormat, str] = {
@@ -83,7 +79,7 @@ class TaskType(StrEnum):
 
     STORE = "save"
     """
-    Create and saved compressed version of file for later download
+    Store original content for download 
     """
 
 

@@ -1,7 +1,7 @@
 import re
 from uuid import UUID, uuid4
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, date
 from typing import Iterator, Optional
 
 from sqlalchemy import event
@@ -66,7 +66,12 @@ class Content(SQLModel, table=True):
     Type of content
     """
 
-    parent_id: int | None = Field(default=None)
+    release_date: date
+
+    genres: list[str] = Field(default=[])
+    """
+    Genres of content
+    """
 
     # TODO: add metadata support
 
@@ -76,6 +81,8 @@ class Content(SQLModel, table=True):
 
     Duration of content in seconds
     """
+
+    content_metadata: dict = Field(default={})
 
     # TODO: thumbnail
     # thumbnail_b64_encoded: str
@@ -134,10 +141,7 @@ def create_content(
     content_type: ContentType,
     description: str,
     duration_s: int | None = None,
-    parent_id: int | None = None,
 ) -> Content:
-    # TODO: try/catch sqlalchemy exceptions
-    # TODO: handle parent_id
     with get_session() as session:
         content = Content(
             name=name,
@@ -199,6 +203,8 @@ def get_content_by_id(content_id: int) -> Optional[Content]:
         return session.get(Content, content_id)
 
 
+# TODO: add genres
+# TODO: add page iterator
 def browse_content(
     name: Optional[str] = None,
     content_type: Optional[ContentType] = None,
@@ -206,7 +212,7 @@ def browse_content(
     """
     Filter content by name and/or type (media format), both matched as regexes.
     """
-    query = select(Content)
+    query = select(Content).where(Content.processed_time != None)
     if name is not None:
         query = query.where(Content.name.regexp_match(name))
     if content_type is not None:

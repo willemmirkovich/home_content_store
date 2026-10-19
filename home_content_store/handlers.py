@@ -2,7 +2,7 @@ from os import path
 from concurrent.futures import Future
 from typing import Callable
 from asyncio.tasks import create_task
-from fastapi import HTTPException, Request
+from fastapi import Request
 
 from home_content_store.db import Task, create_content, create_task, Content
 from home_content_store.models import ContentModel, ContentType, TaskType
@@ -20,19 +20,9 @@ def movie_handler(
     content_model: ContentModel,
     file_path: str,
 ) -> HandlerReturn:
-
-
-    if content_model.parent_id:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"{content_model.content_type} does not support parent"
-        )
-
-
     duration_s, total_frames = probe_video_info(file_path)
 
     # TODO: async?
-    # TODO: how to handle parent validation?
     content = create_content(
         content_model.name,
         content_model.title,
@@ -62,26 +52,9 @@ def movie_handler(
     return content, tasks, futures
 
 
-async def tv_show_handler():
-    # TODO: check not parent_id
-    pass
-
-
-async def tv_season_handler():
-    # TODO: check parent is tv_show type
-    pass
-
-
-async def tv_episode_handler():
-    # TODO: check parent is tv_episode type
-    pass
-
-
-async def recording_handler():
-    pass
+# TODO: add other content type handlers
 
 
 HANDLERS: dict[ContentType, HandlerFunc] = {
-    # TODO: fix type
     ContentType.MOVIE: movie_handler,
 }

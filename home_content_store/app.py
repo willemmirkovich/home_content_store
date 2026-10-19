@@ -11,6 +11,7 @@ stream -> get location of mpd file to stream movie/music
 
 
 import asyncio
+from datetime import date
 import logging
 
 from contextlib import asynccontextmanager
@@ -110,7 +111,8 @@ async def post_upload(
     format: FileFormat,
     description: str,
     content_type: ContentType,
-    parent_id: int | None = None
+    release_date: date,
+    genres: list[str] | None = None,
 ) -> UploadResponse:
     name_snake_case = name.lower().replace(" ", "_").strip()
 
@@ -129,7 +131,8 @@ async def post_upload(
         format=format,
         description=description,
         content_type=content_type,
-        parent_id=parent_id
+        release_date=release_date,
+        genres=genres,
     )
 
 

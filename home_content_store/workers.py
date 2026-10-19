@@ -38,23 +38,6 @@ async def download_file(request: Request, file: str) -> int:
     return total_bytes
 
 
-def compress(file: str,
-             update_progress_fn: ProgressUpdater):
-    """
-    compress file with `zstd` to save raw file in content store
-
-    file: file location
-    update_progress_fn: callable to update progress
-    """
-    pass
-
-
-def mock_process_video(video_file: str,
-                       progress_queue: Queue):
-    progress_queue.put((video_file, 1))
-    return
-
-
 # TODO: probe HxW px
 def probe_video_info(video_file: str) -> tuple[float, int]:
     """
@@ -117,7 +100,7 @@ def create_streamable_artifact(task_id: UUID,
     )
 
     @ffmpeg.on("progress")
-    def on_progress(progress: Progress):
+    def _on_progress(progress: Progress):
         rounded_progress = round(min(progress.frame / total_frames, 1.0), 2)
         progress_queue.put((task_id, rounded_progress))
 

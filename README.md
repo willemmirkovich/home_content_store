@@ -50,3 +50,16 @@ Project to serve content (video, games, ...) via home DB for access via player o
 - Add authentication for web app
 - Add content store for video game files
 
+
+## Disclaimer
+
+Home Content Store is a personal tool for organizing and playing media files
+that you own or are otherwise legally entitled to use. It does not host,
+provide, index, or link to any copyrighted content, and it does not include
+any means of circumventing DRM or other protection measures.
+
+The author does not condone or endorse piracy or the unauthorized
+reproduction or distribution of copyrighted material. You are solely
+responsible for ensuring your use of this software complies with the laws of
+your jurisdiction and the rights of content owners. The software is provided
+"as is", without warranty, and the author accepts no liability for misuse.
