@@ -1,15 +1,3 @@
-"""
-Overall plan
-
-upload -> allow for uploading of video, music, ...
-
-browse -> either search for, or get all content available
-
-stream -> get location of mpd file to stream movie/music
-    Need to flesh this out
-"""
-
-
 import asyncio
 import logging
 
@@ -73,7 +61,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-# TODO: setup lifespan with process pool
 # NOTE: max_tasks_per_child to setup lifetime for process
 
 app.mount("/streams", StaticFiles(directory=STREAM_DIR), name="streams")
@@ -110,6 +97,7 @@ async def cleanup_when_done(tasks: list[Task], futures: list[Future], staging_di
     else:
         logger.error(f'content {content_id} failed to process')
 
+    # TODO: retry tasks requires orginal file
     rmtree(staging_dir_path)
     logger.info(f'{staging_dir_path} removed')
 
