@@ -4,10 +4,10 @@ from contextlib import contextmanager
 from datetime import datetime, date, timezone
 from typing import Iterator, Optional
 
-from sqlalchemy import JSON, Column, event
+from sqlalchemy import JSON, Column, LargeBinary, event
 from sqlmodel import SQLModel, Field, Session, create_engine, select
 
-from home_content_store.models import ContentType, FileFormat, TaskType, TaskStatus
+from home_content_store.models import ContentType, FileFormat, TaskType, TaskStatus, ThumbnailFormat
 from home_content_store.env import DATA_DIR
 
 
@@ -87,12 +87,6 @@ class Content(SQLModel, table=True):
 
     content_metadata: dict = Field(default_factory=dict, sa_column=Column(JSON))
 
-    # TODO: thumbnail
-    # thumbnail_b64_encoded: str
-    # """
-    # base64 encoded image thumbnail for content
-    # """
-
     creation_time: datetime = Field(default_factory=utc_now)
     """
     When the content item was created, before any media is attached
@@ -104,6 +98,30 @@ class Content(SQLModel, table=True):
     """
 
     processed_time: datetime | None = Field(default=None)
+
+
+class Thumbnail(SQLModel, table=True):
+    """
+    Thumbnail image for a content item, kept out of `Content` so listing
+    content doesn't load every image blob.
+    """
+
+    content_id: int = Field(primary_key=True, foreign_key="content.id")
+
+    data: bytes = Field(sa_column=Column(LargeBinary, nullable=False))
+    """
+    Raw image bytes
+    """
+
+    format: ThumbnailFormat
+    """
+    Image media type of `data`
+    """
+
+    update_time: datetime = Field(default_factory=utc_now)
+    """
+    When the thumbnail was last set, used to version the thumbnail URL
+    """
 
 
 class Task(SQLModel, table=True):
@@ -237,17 +255,54 @@ def get_content_by_id(content_id: int) -> Optional[Content]:
 def browse_content(
     name: Optional[str] = None,
     content_type: Optional[ContentType] = None,
-) -> list[Content]:
+) -> list[tuple[Content, Optional[datetime]]]:
     """
     Filter content by name and/or type (media format), both matched as regexes.
+
+    Returns each content item with its thumbnail's `update_time`, `None` if
+    it has no thumbnail. The image bytes themselves aren't loaded.
     """
-    query = select(Content).where(Content.processed_time != None)
+    query = (
+        select(Content, Thumbnail.update_time)
+        .outerjoin(Thumbnail, Thumbnail.content_id == Content.id)
+        .where(Content.processed_time != None)
+    )
     if name is not None:
         query = query.where(Content.name.regexp_match(name))
     if content_type is not None:
         query = query.where(Content.content_type == content_type)
     with get_session() as session:
-        return list(session.exec(query).all())
+        return [(content, thumbnail_time) for content, thumbnail_time in session.exec(query).all()]
+
+
+def set_thumbnail(content_id: int, data: bytes, format: ThumbnailFormat) -> None:
+    """
+    Create or replace the thumbnail for `content_id`
+    """
+    with get_session() as session:
+        thumbnail = session.get(Thumbnail, content_id)
+        if thumbnail is None:
+            thumbnail = Thumbnail(content_id=content_id, data=data, format=format)
+        else:
+            thumbnail.data = data
+            thumbnail.format = format
+            thumbnail.update_time = utc_now()
+        session.add(thumbnail)
+
+
+def get_thumbnail(content_id: int) -> Optional[Thumbnail]:
+    with get_session() as session:
+        return session.get(Thumbnail, content_id)
+
+
+def get_thumbnail_time(content_id: int) -> Optional[datetime]:
+    """
+    `update_time` of the thumbnail for `content_id`, without loading the image
+    """
+    with get_session() as session:
+        return session.exec(
+            select(Thumbnail.update_time).where(Thumbnail.content_id == content_id)
+        ).first()
 
 
 def mark_uploaded(content_id: int, upload_time: Optional[datetime] = None) -> None:

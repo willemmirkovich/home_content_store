@@ -15,6 +15,17 @@ class FileFormat(StrEnum):
 
     # FUTURE: music streaming???
 
+class ThumbnailFormat(StrEnum):
+    """Supported image formats for thumbnail upload"""
+
+    JPEG = "image/jpeg"
+    PNG = "image/png"
+    WEBP = "image/webp"
+
+
+MAX_THUMBNAIL_BYTES = 5 * 1024 * 1024
+
+
 class ContentType(StrEnum):
     """Content types to store"""
 
@@ -58,6 +69,10 @@ class UploadResponse(BaseModel):
 class BrowseResponse(BaseModel):
     content_id: int
     name: str
+    thumbnail_url: str | None
+    """
+    URL to the content's thumbnail image, `None` if it has none
+    """
 
 
 class ContentResponse(BaseModel):
@@ -72,6 +87,10 @@ class ContentResponse(BaseModel):
     manifest_url: str | None
     """
     URL to the streaming manifest, only set once processing has completed
+    """
+    thumbnail_url: str | None
+    """
+    URL to the content's thumbnail image, `None` if it has none
     """
 
 

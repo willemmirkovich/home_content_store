@@ -2,7 +2,9 @@ from pathlib import Path
 
 import httpx
 
-SAMPLE_PATH = Path(__file__).resolve().parent.parent / "sample" / "Popeye_forPresident_512kb.mp4"
+SAMPLE_DIR = Path(__file__).resolve().parent.parent / "sample"
+SAMPLE_PATH = SAMPLE_DIR / "Popeye_forPresident_512kb.mp4"
+THUMBNAIL_PATH = SAMPLE_DIR / "popeye_thumbnail.jpg"
 NAME = "popeye_for_president"
 TITLE = "Popeye for President"
 FORMAT = "video/mp4"
@@ -34,6 +36,14 @@ print(response.status_code)
 print(response.json())
 response.raise_for_status()
 content_id = response.json()["id"]
+
+response = httpx.put(
+    f"{BASE_URL}/content/{content_id}/thumbnail",
+    content=THUMBNAIL_PATH.read_bytes(),
+    headers={"Content-Type": "image/jpeg"},
+)
+print(response.status_code)
+response.raise_for_status()
 
 with open(SAMPLE_PATH, "rb") as f:
     response = httpx.post(

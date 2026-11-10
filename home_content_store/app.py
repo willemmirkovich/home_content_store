@@ -17,7 +17,9 @@ from contextlib import asynccontextmanager
 from queue import Empty
 import re
 
-from fastapi import FastAPI, HTTPException, Request
+from datetime import datetime
+
+from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import IntegrityError
 from os import makedirs
@@ -26,8 +28,8 @@ from multiprocessing import Manager, Queue
 from shutil import rmtree
 
 from home_content_store.env import DATA_DIR, STREAM_DIR
-from home_content_store.db import Task, browse_content, create_content, get_content_by_id, init_db, mark_processed, mark_uploaded, update_task, init_db
-from home_content_store.models import FILE_FORMAT_TO_EXT, BrowseResponse, ContentModel, ContentResponse, ContentType, CreateContentResponse, TaskStatus, UploadResponse
+from home_content_store.db import Task, browse_content, create_content, get_content_by_id, get_thumbnail, get_thumbnail_time, init_db, mark_processed, mark_uploaded, set_thumbnail, update_task
+from home_content_store.models import FILE_FORMAT_TO_EXT, MAX_THUMBNAIL_BYTES, BrowseResponse, ContentModel, ContentResponse, ContentType, CreateContentResponse, TaskStatus, ThumbnailFormat, UploadResponse
 from home_content_store.workers import download_file
 from home_content_store.handlers import HANDLERS
 
@@ -75,6 +77,16 @@ app = FastAPI(lifespan=lifespan)
 # NOTE: max_tasks_per_child to setup lifetime for process
 
 app.mount("/streams", StaticFiles(directory=STREAM_DIR), name="streams")
+
+
+def thumbnail_url(content_id: int, thumbnail_time: datetime | None) -> str | None:
+    """
+    Versioned so a replaced thumbnail gets a new URL, letting clients
+    cache each version indefinitely.
+    """
+    if thumbnail_time is None:
+        return None
+    return f'/content/{content_id}/thumbnail?v={int(thumbnail_time.timestamp())}'
 
 
 async def cleanup_when_done(tasks: list[Task], futures: list[Future], staging_dir_path: str):
@@ -162,7 +174,57 @@ async def get_browse(name: str | None = None, content_type: ContentType | None =
         contents = browse_content(name=name, content_type=content_type)
     except re.error as e:
         raise HTTPException(status_code=400, detail=f'invalid regex: {e}')
-    return [BrowseResponse(content_id=content.id, name=content.name) for content in contents]
+    return [
+        BrowseResponse(
+            content_id=content.id,
+            name=content.name,
+            thumbnail_url=thumbnail_url(content.id, thumbnail_time),
+        )
+        for content, thumbnail_time in contents
+    ]
+
+
+@app.put('/content/{content_id}/thumbnail', status_code=204)
+async def put_thumbnail(
+    request: Request,
+    content_id: int,
+    content_type: str = Header(),
+) -> None:
+    """
+    Set or replace a content item's thumbnail. The body is the raw image, with
+    `Content-Type` set to its image format.
+    """
+    try:
+        format = ThumbnailFormat(content_type)
+    except ValueError:
+        allowed = ', '.join(f.value for f in ThumbnailFormat)
+        raise HTTPException(status_code=415, detail=f'thumbnail must be one of: {allowed}')
+
+    if get_content_by_id(content_id) is None:
+        raise HTTPException(status_code=404, detail=f'no content with id {content_id}')
+
+    data = bytearray()
+    async for chunk in request.stream():
+        data.extend(chunk)
+        if len(data) > MAX_THUMBNAIL_BYTES:
+            raise HTTPException(status_code=413, detail=f'thumbnail exceeds {MAX_THUMBNAIL_BYTES} bytes')
+    if not data:
+        raise HTTPException(status_code=400, detail='thumbnail is empty')
+
+    set_thumbnail(content_id, bytes(data), format)
+
+
+@app.get('/content/{content_id}/thumbnail')
+async def get_content_thumbnail(content_id: int) -> Response:
+    thumbnail = get_thumbnail(content_id)
+    if thumbnail is None:
+        raise HTTPException(status_code=404, detail=f'no thumbnail for content {content_id}')
+    return Response(
+        content=thumbnail.data,
+        media_type=thumbnail.format,
+        # safe to cache long-term: `thumbnail_url` changes when it's replaced
+        headers={'Cache-Control': 'public, max-age=31536000, immutable'},
+    )
 
 
 @app.get('/content/{content_id}')
@@ -188,4 +250,5 @@ async def get_content(content_id: int) -> ContentResponse:
         upload_time=content.upload_time,
         processed_time=content.processed_time,
         manifest_url=manifest_url,
+        thumbnail_url=thumbnail_url(content.id, get_thumbnail_time(content.id)),
     )
