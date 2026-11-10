@@ -46,6 +46,10 @@ FILE_FORMAT_TO_EXT: dict[FileFormat, str] = {
 }
 
 
+class CreateContentResponse(BaseModel):
+    id: int
+
+
 class UploadResponse(BaseModel):
     id: int
     size_mb: float
@@ -62,7 +66,8 @@ class ContentResponse(BaseModel):
     format: str
     description: str
     duration_s: int | None
-    upload_time: datetime
+    creation_time: datetime
+    upload_time: datetime | None
     processed_time: datetime | None
     manifest_url: str | None
     """

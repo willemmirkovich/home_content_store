@@ -4,33 +4,25 @@ from typing import Callable
 from asyncio.tasks import create_task
 from fastapi import Request
 
-from home_content_store.db import Task, create_content, create_task, Content
-from home_content_store.models import ContentModel, ContentType, TaskType
+from home_content_store.db import Task, create_task, set_duration, Content
+from home_content_store.models import ContentType, TaskType
 from home_content_store.env import STREAM_DIR
 from home_content_store.workers import create_streamable_artifact, probe_video_info
 
 
 type HandlerReturn = tuple[Content, list[Task], list[Future]]
-type HandlerFunc = Callable[[Request, ContentModel, str], HandlerReturn]
+type HandlerFunc = Callable[[Request, Content, str], HandlerReturn]
 
 
 
 def movie_handler(
     request: Request,
-    content_model: ContentModel,
+    content: Content,
     file_path: str,
 ) -> HandlerReturn:
     duration_s, total_frames = probe_video_info(file_path)
 
-    # TODO: async?
-    content = create_content(
-        content_model.name,
-        content_model.title,
-        content_model.format,
-        content_model.content_type,
-        content_model.description,
-        int(duration_s)
-    )
+    set_duration(content.id, int(duration_s))
 
     stream_path = str(STREAM_DIR / str(content.id))
     # NOTE: should not happen in production setting with db managing ids

@@ -2,7 +2,6 @@ import json
 import subprocess
 
 from uuid import UUID
-from datetime import datetime
 from fastapi import Request
 from os import makedirs, path
 from typing import Callable
@@ -10,7 +9,7 @@ from multiprocessing import Queue
 
 from ffmpeg import FFmpeg, Progress
 
-from home_content_store.db import update_task
+from home_content_store.db import update_task, utc_now
 
 
 type ProgressUpdater = Callable[[float], None]
@@ -106,5 +105,5 @@ def create_streamable_artifact(task_id: UUID,
 
     ffmpeg.execute()
 
-    update_task(task_id, end_time=datetime.now())
+    update_task(task_id, end_time=utc_now())
     return task_id

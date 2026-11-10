@@ -14,20 +14,30 @@ Popeye for President March 30 Tom Johnson
 Frank Endres Robert Connavale Jack Mercer Seymour Kneitel
 In the Public Domain in the United States.
 """
+RELEASE_DATE = "1956-03-30"
 GENRES = ["cartoon", "animation"]
+BASE_URL = "http://localhost:8000"
+
+response = httpx.post(
+    f"{BASE_URL}/content",
+    json={
+        "name": NAME,
+        "title": TITLE,
+        "format": FORMAT,
+        "content_type": CONTENT_TYPE,
+        "description": DESCRIPTION,
+        "release_date": RELEASE_DATE,
+        "genres": GENRES,
+    },
+)
+print(response.status_code)
+print(response.json())
+response.raise_for_status()
+content_id = response.json()["id"]
 
 with open(SAMPLE_PATH, "rb") as f:
     response = httpx.post(
-        "http://localhost:8000/upload",
-        params={
-            "name": NAME,
-            "title": TITLE,
-            "format": FORMAT,
-            "content_type": CONTENT_TYPE,
-            "description": DESCRIPTION,
-            "genres": GENRES,
-
-        },
+        f"{BASE_URL}/upload/{content_id}",
         content=f,
         headers={"Content-Type": "application/octet-stream"},
         timeout=None,

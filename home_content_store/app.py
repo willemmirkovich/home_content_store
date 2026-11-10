@@ -11,7 +11,6 @@ stream -> get location of mpd file to stream movie/music
 
 
 import asyncio
-from datetime import date
 import logging
 
 from contextlib import asynccontextmanager
@@ -20,14 +19,15 @@ import re
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy.exc import IntegrityError
 from os import makedirs
 from concurrent.futures import Future, ProcessPoolExecutor
 from multiprocessing import Manager, Queue
 from shutil import rmtree
 
 from home_content_store.env import DATA_DIR, STREAM_DIR
-from home_content_store.db import Task, browse_content, get_content_by_id, init_db, mark_processed, update_task, init_db
-from home_content_store.models import FILE_FORMAT_TO_EXT, BrowseResponse, ContentModel, ContentResponse, ContentType, FileFormat, TaskStatus, UploadResponse
+from home_content_store.db import Task, browse_content, create_content, get_content_by_id, init_db, mark_processed, mark_uploaded, update_task, init_db
+from home_content_store.models import FILE_FORMAT_TO_EXT, BrowseResponse, ContentModel, ContentResponse, ContentType, CreateContentResponse, TaskStatus, UploadResponse
 from home_content_store.workers import download_file
 from home_content_store.handlers import HANDLERS
 
@@ -102,47 +102,51 @@ async def cleanup_when_done(tasks: list[Task], futures: list[Future], staging_di
     logger.info(f'{staging_dir_path} removed')
 
 
-@app.post("/upload")
-async def post_upload(
-    request: Request,
-    # TODO: modify in place arg?
-    name: str,
-    title: str,
-    format: FileFormat,
-    description: str,
-    content_type: ContentType,
-    release_date: date,
-    genres: list[str] | None = None,
-) -> UploadResponse:
-    name_snake_case = name.lower().replace(" ", "_").strip()
+@app.post("/content", status_code=201)
+async def post_content(content_model: ContentModel) -> CreateContentResponse:
+    """
+    Create a content item. The media itself is posted later to `/upload/{content_id}`
+    """
+    try:
+        content = create_content(
+            name=content_model.name.lower().replace(" ", "_").strip(),
+            title=content_model.title,
+            format=content_model.format,
+            content_type=content_model.content_type,
+            description=content_model.description,
+            release_date=content_model.release_date,
+            genres=content_model.genres,
+            content_metadata=content_model.content_metadata,
+        )
+    except IntegrityError:
+        raise HTTPException(status_code=409, detail=f'content named {content_model.name} already exists')
+    return CreateContentResponse(id=content.id)
 
-    dir_path = DATA_DIR / "files" / name_snake_case
-    # dir_path = path.join(DIR, 'files', name_snake_case)
-    file_ext = FILE_FORMAT_TO_EXT[format]
-    # file_path = path.join(dir_path, f'{name_snake_case}.{file_ext}')
-    file_path = str(dir_path / f'{name_snake_case}.{file_ext}')
-    makedirs(dir_path)
+
+@app.post("/upload/{content_id}")
+async def post_upload(request: Request, content_id: int) -> UploadResponse:
+    content = get_content_by_id(content_id)
+    if content is None:
+        raise HTTPException(status_code=404, detail=f'no content with id {content_id}')
+
+    try:
+        handler = HANDLERS[content.content_type]
+    except KeyError:
+        raise HTTPException(status_code=500, detail=f'{content.content_type} is not handled yet')
+
+    try:
+        mark_uploaded(content_id)
+    except IntegrityError:
+        raise HTTPException(status_code=409, detail=f'content {content_id} already has media uploaded')
+
+    dir_path = DATA_DIR / "files" / content.name
+    file_ext = FILE_FORMAT_TO_EXT[content.format]
+    file_path = str(dir_path / f'{content.name}.{file_ext}')
+    makedirs(dir_path, exist_ok=True)
 
     total_bytes = await download_file(request, file_path)
 
-    content_model = ContentModel(
-        name=name_snake_case,
-        title=title,
-        format=format,
-        description=description,
-        content_type=content_type,
-        release_date=release_date,
-        genres=genres,
-    )
-
-
-    try:
-        handler = HANDLERS[content_type]
-    except KeyError:
-        raise HTTPException(status_code=500, detail=f'{content_type} is not handled yet')
-    content, tasks, futures = handler(
-        request, content_model, file_path
-    )
+    content, tasks, futures = handler(request, content, file_path)
 
     asyncio.create_task(cleanup_when_done(tasks, futures, str(dir_path)))
 
@@ -180,7 +184,8 @@ async def get_content(content_id: int) -> ContentResponse:
         format=content.format,
         description=content.description,
         duration_s=content.duration_s,
-        upload_time=content.uploade_time,
+        creation_time=content.creation_time,
+        upload_time=content.upload_time,
         processed_time=content.processed_time,
         manifest_url=manifest_url,
     )

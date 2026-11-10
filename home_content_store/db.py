@@ -1,11 +1,10 @@
 import re
 from uuid import UUID, uuid4
 from contextlib import contextmanager
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from typing import Iterator, Optional
 
-from sqlalchemy import event
-from sqlalchemy import event
+from sqlalchemy import JSON, Column, event
 from sqlmodel import SQLModel, Field, Session, create_engine, select
 
 from home_content_store.models import ContentType, FileFormat, TaskType, TaskStatus
@@ -32,6 +31,10 @@ def _register_regexp(dbapi_connection, connection_record) -> None:
     dbapi_connection.create_function(
         "REGEXP", 2, lambda pattern, value: re.search(pattern, value) is not None
     )
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 class Content(SQLModel, table=True):
@@ -68,7 +71,7 @@ class Content(SQLModel, table=True):
 
     release_date: date
 
-    genres: list[str] = Field(default=[])
+    genres: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     """
     Genres of content
     """
@@ -82,7 +85,7 @@ class Content(SQLModel, table=True):
     Duration of content in seconds
     """
 
-    content_metadata: dict = Field(default={})
+    content_metadata: dict = Field(default_factory=dict, sa_column=Column(JSON))
 
     # TODO: thumbnail
     # thumbnail_b64_encoded: str
@@ -90,7 +93,15 @@ class Content(SQLModel, table=True):
     # base64 encoded image thumbnail for content
     # """
 
-    uploade_time: datetime = Field(default_factory=datetime.now)
+    creation_time: datetime = Field(default_factory=utc_now)
+    """
+    When the content item was created, before any media is attached
+    """
+
+    upload_time: datetime | None = Field(default=None)
+    """
+    When the media was uploaded, `None` until then
+    """
 
     processed_time: datetime | None = Field(default=None)
 
@@ -107,7 +118,7 @@ class Task(SQLModel, table=True):
 
     progress: float
 
-    start_time: datetime = Field(default_factory=datetime.now)
+    start_time: datetime = Field(default_factory=utc_now)
 
     end_time: datetime | None = Field(default=None)
 
@@ -116,6 +127,18 @@ class Task(SQLModel, table=True):
 
 def init_db() -> None:
     SQLModel.metadata.create_all(engine)
+    with engine.begin() as conn:
+        # media can only be uploaded once per content item
+        conn.exec_driver_sql(
+            """
+            CREATE TRIGGER IF NOT EXISTS content_upload_once
+            BEFORE UPDATE OF upload_time ON content
+            WHEN OLD.upload_time IS NOT NULL
+            BEGIN
+                SELECT RAISE(ABORT, 'content already uploaded');
+            END
+            """
+        )
 
 
 @contextmanager
@@ -140,6 +163,9 @@ def create_content(
     format: FileFormat,
     content_type: ContentType,
     description: str,
+    release_date: date,
+    genres: list[str] | None = None,
+    content_metadata: dict | None = None,
     duration_s: int | None = None,
 ) -> Content:
     with get_session() as session:
@@ -149,6 +175,9 @@ def create_content(
             content_type=content_type,
             format=format,
             description=description,
+            release_date=release_date,
+            genres=genres or [],
+            content_metadata=content_metadata or {},
             duration_s=duration_s,
         )
         session.add(content)
@@ -221,12 +250,34 @@ def browse_content(
         return list(session.exec(query).all())
 
 
+def mark_uploaded(content_id: int, upload_time: Optional[datetime] = None) -> None:
+    """
+    Set `upload_time`. Raises `IntegrityError` (via the `content_upload_once`
+    trigger) if media was already uploaded.
+    """
+    with get_session() as session:
+        content = session.get(Content, content_id)
+        if content is None:
+            raise ValueError(f"no content with id {content_id}")
+        content.upload_time = upload_time or utc_now()
+        session.add(content)
+
+
+def set_duration(content_id: int, duration_s: int) -> None:
+    with get_session() as session:
+        content = session.get(Content, content_id)
+        if content is None:
+            raise ValueError(f"no content with id {content_id}")
+        content.duration_s = duration_s
+        session.add(content)
+
+
 def mark_processed(content_id: int, processed_time: Optional[datetime] = None) -> None:
     with get_session() as session:
         content = session.get(Content, content_id)
         if content is None:
             raise ValueError(f"no content with id {content_id}")
-        content.processed_time = processed_time or datetime.now()
+        content.processed_time = processed_time or utc_now()
         session.add(content)
         session.flush()
         session.refresh(content)
