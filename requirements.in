@@ -1,5 +1,0 @@
-python-ffmpeg
-fastapi[standard]
-alembic
-sqlmodel
-httpx
